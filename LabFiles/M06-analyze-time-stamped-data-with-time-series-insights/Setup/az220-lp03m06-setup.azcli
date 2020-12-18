@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Change these values!
+YourID="{your-id}"
+Location="{your-location}"
+RGName="{your-rg}"
+
+# ensure variables have been set
+if [ $YourID = "{your-id}" ] || [ $Location = "{your-location}" ] || [ $RGName = "{your-rg}" ]
+then
+    echo "You must change the values"
+    exit 1
+fi
+
+RGName="rg-az220"
+IoTHubName="iot-az220-training-$YourID"
+
+DeviceID1="sensor-thl-truck0001"
+DeviceID2="sensor-thl-airplane0001"
+DeviceID3="sensor-thl-container0001"
+
+# Setup colored output
+YELLOW='\033[0;33m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# functions
+reportStatus() {
+    if [ -z "$1" ]
+    then
+        return
+    fi
+    if [ $1 -eq "0" ]
+    then 
+        printf "${GREEN}Succeeded${NC}\n"
+    else
+        printf "${RED}Failed - ${2}${NC}\n"
+        echo $2 >> build.log
+    fi
+}
+
+# build log file
+rm build.log.old 2> /dev/null
+cp build.log build.log.old 2> /dev/null
+echo "Building Lab Resources" > build.log
+
+# create resource group
+printf "${YELLOW}Create resource group ${RGName} - ${NC}"
+exists=$( az group exists --name rg-az220 -o tsv )
+if [ "${exists}" == "true" ]
+then
+    printf "${GREEN}Already exists\n${NC}"
+else
+    output=$( az group create --name $RGName --location $Location -o json 2>&1 >> build.log)
+    reportStatus $? "$output"
+fi
+
+# create IoT Hub
+printf "${YELLOW}Create IoT Hub $IoTHubName - ${NC}"
+exists=$( az iot hub list --query "[?contains(name, '${IoTHubName}')].name" -o tsv )
+if [ "${exists}" == "${IoTHubName}" ]
+then
+    printf "${GREEN}Already exists\n${NC}"
+else
+    output=$( az iot hub create --name $IoTHubName -g $RGName --sku S1 --location $Location -o json 2>&1 >> build.log)
+    reportStatus $? "$output"
+fi
+
+# create a device ID using Symmetric Key Auth and Connect it to the IoT Hub
+createDevice() {
+    printf "${YELLOW}Create device ${1} - ${NC}"
+    exists=$( az iot hub device-identity list  --hub-name $IoTHubName --query "[?contains(deviceId, '${1}')].deviceId" -o tsv )
+    if [ "${exists}" == "${1}" ]
+    then
+        printf "${GREEN}Already exists\n${NC}"
+    else
+        output=$( az iot hub device-identity create --hub-name $IoTHubName --device-id $1 -o json 2>&1 >> build.log )
+        reportStatus $? "$output"
+    fi
+}
+
+# create the Device IDs 
+createDevice $DeviceID1
+createDevice $DeviceID2
+createDevice $DeviceID3
+
+# retrieve the Connection String for the IoT Devices
+echo ""
+printf "${GREEN}Device Connection Strings for the application:${NC}\n"
+echo ----------------------------------------------------
+az iot hub device-identity connection-string show --hub-name $IoTHubName --device-id sensor-thl-truck0001 -o tsv
+az iot hub device-identity connection-string show --hub-name $IoTHubName --device-id sensor-thl-airplane0001 -o tsv
+az iot hub device-identity connection-string show --hub-name $IoTHubName --device-id sensor-thl-container0001 -o tsv
